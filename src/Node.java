@@ -7,6 +7,7 @@ public class Node<T> {
     private T data = null;
     private String label;
     private String labelValue = "E";
+    private int labelIndex = -1;
 
     public Node(T data) {
         this.data = data;
@@ -86,5 +87,20 @@ public class Node<T> {
 
     public void removeParent() {
         this.parent = null;
+    }
+    
+    public boolean hasLabelIndex(){
+    	if(labelIndex != -1){
+    		return true;
+    	}
+    	return false;
+    }
+    
+    public void setLabelIndex(int i){
+    	this.labelIndex = i;
+    }
+    
+    public int getLabelIndex(){
+    	return labelIndex;
     }
 }

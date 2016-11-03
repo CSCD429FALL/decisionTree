@@ -1,5 +1,6 @@
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
@@ -16,10 +17,13 @@ public class Main {
 
 	public static void main(String[] args) throws FileNotFoundException{
 
-		String[][] genes_relation = genesRelation("Genes_relation.data");
-		String[][] interactions_relation = interactionsRelation("Interactions_relation.data");
+		String[][] genes_relation = genesRelation("Genes_relation.data",4346);
+		String[][] genes_relation_test = genesRelation("Genes_relation.test", 1929);
+		//String[][] interactions_relation = interactionsRelation("Interactions_relation.data");
 
-		//Setting 1 to indicate if that attribute has been split.
+		/*
+		 * Attribute list to be used for generating the decision tree.
+		 */
 		HashMap<Integer, String> attribute_list = new HashMap<>();
 		attribute_list.put(GENES_ESS, "essential");
 		attribute_list.put(GENES_CLSS, "class");
@@ -27,26 +31,87 @@ public class Main {
 		attribute_list.put(GENES_PHENO, "phenotype");
 		attribute_list.put(GENES_MOT, "motif");
 		attribute_list.put(GENES_CHROM, "chromosome number");
-		//attribute_list.put(GENES_FUNC, "function");
+		//attribute_list.put(GENES_FUNC, "function"); //not using function attribute!
 		
 
+		//Generating decision tree from training data set.
 		Node<String[][]> tree = decisionTree(genes_relation, attribute_list);
 		
-		
-
+		/*	Printing String representation of tree
+		 *  Print format:
+		 *  	if not a root
+		 *  		parentLabel (if leaf prints "leaf") : attributeValue -> nodeLabel
+		 *  	
+		 *  	if root
+		 *  		nodeLabel 
+		 */
 		
 		System.out.println("START TREE PRINT");
-
 		printTree(tree,0);
+		System.out.println("END TREE PRINT");
+		
+		
+		/*
+		 * Determining the accuracy of the decision tree.
+		 */
+		double accuracy = 0;
+		
+		
+		Scanner in = new Scanner(new File("keys.txt"));
+		
+		String keyid = "";
+		String keyClass = "";
+		
+		HashMap<String, String> keys = new HashMap<>();
+		while(in.hasNextLine()){
+			String[] commaSplit = in.nextLine().split(",");
+			
+			keyid = commaSplit[0];
+			keyClass = commaSplit[1];
+			
+			keys.put(keyid, keyClass);
+		}
 
-
-
-
+		in.close();
+		
+		int hits = 0;
+		PrintWriter out = new PrintWriter("out.txt");
+		for(String[] tuple : genes_relation_test){
+			String id = tuple[GENES_ID];
+			String clss = predictLocalization(tuple, tree, attribute_list);
+			
+			out.println(id + ", " + clss);
+			
+			
+			/*
+			 * Comparing the values.
+			 * 
+			 */
+			if(keys.containsKey(id)){
+				//System.out.println("key: " + keys.get(id) + " test: " +  clss);
+				String keyValue = "";
+				String testValue = "";
+				
+				keyValue = keys.get(id) + ".";//adding period to match file reading format
+				testValue = clss.replaceAll("\\s+", "");//removing white space to match key reading format.
+				
+				if(keyValue.equals(testValue)){
+					hits++;
+				}
+			}
+		}
+		out.close();
+		accuracy = (double)hits/(double)keys.size();
+		
+		System.out.println("Accuracy: " + accuracy);
 
 
 
 	}
 	
+	/*
+	 * Prints the given tree with root node @param N.
+	 */
 	public static void printTree(Node<String[][]> N, int index){
 		
 		
@@ -63,10 +128,49 @@ public class Main {
 			for(Node<String[][]> n: N.getChildren()){
 				printTree(n, index++);
 			}
+			
+		}
+			
+		
+	}
+	
+	/*
+	 * Predicts the localization attribute of the given
+	 * test data set.
+	 * 
+	 * @param decisionTree: The tree root node that will be used
+	 * to predict the localization value of the given
+	 * test data set.
+	 * 
+	 */
+	public static String predictLocalization(String[] tuple, Node<String[][]> N, HashMap<Integer, String> attrList){
+		
+		if(N.isLeaf()){
+			return N.getLabel();
+		}
+		
+		int curAttribute = -1;
+		if(N.hasLabelIndex())
+			curAttribute = N.getLabelIndex();
+		else
+			throw new IllegalStateException();
+		
+		
+		Node<String[][]> curNode = null;
+		
+		
+		for(Node<String[][]> child : N.getChildren()){
+			if(child.getLabelValue().equals(tuple[curAttribute])){
+				curNode = child;
+				break;
+			}
+		}
+		if(curNode == null){
+			curNode = N.getChildren().get(0);
 		}
 		
 		
-		
+		return predictLocalization(tuple, curNode, attrList);
 		
 		
 	}
@@ -96,14 +200,15 @@ public class Main {
 		
 		if(attribute_list.isEmpty()){
 			N.setLabel(getMajorityClass(D));
-			System.out.println("attr list empty class label:" + getMajorityClass(D));
+			//System.out.println("attr list empty class label:" + getMajorityClass(D));
 			return N;
 		}
 
 		//Applying attribute selection method: information gain.
 		HashMap.Entry<Integer, String> splitCriterion = info(N.getData(), attribute_list);
 		N.setLabel(splitCriterion.getValue());
-		System.out.println("Split label:" + splitCriterion.getValue());
+		N.setLabelIndex(splitCriterion.getKey());
+		//System.out.println("Split label:" + splitCriterion.getValue());
 		
 		//for each outcome of the splitting_criterion
 		//partition the tuples and grow subtrees for each partition.
@@ -116,12 +221,16 @@ public class Main {
 		{	
 			String[][] subset = getSubset(D, splitCriterion.getKey(), e.getKey());
 		
+			/*
+			 * THIRD TERMINATING CONDITION
+			 * If subset is empty then attach a leaf node labeled with the majority class of D.
+			 */
 			if(subset.length == 0){
 				
-				String[][] majorityClass = getSubset(D, GENES_CLASS_LOC, getMajorityClass(N.getData()));
+				//String[][] majorityClass = getSubset(D, GENES_CLASS_LOC, getMajorityClass(N.getData()));
 				Node<String[][]> leaf = new Node<String[][]>(new String[0][0]);
 				leaf.setLabel(getMajorityClass(D));
-				System.out.println("subset length 0:" + getMajorityClass(D));
+				//System.out.println("subset length 0:" + getMajorityClass(D));
 				N.addChild(leaf);
 				
 				
@@ -139,6 +248,14 @@ public class Main {
 		
 	}
 	
+	/*
+	 * Returns a subset of the data set.
+	 * @param attr: The global static index that points to the attribute
+	 * from where all values will be checked.
+	 * @param value: The String value that will be checked for every
+	 * tuple. If a tuple has this value at the given attribute then that
+	 * tuple will be added to the sub set.
+	 */
 	public static String[][] getSubset(String[][] D, int attr, String value){
 		
 		ArrayList<String[]> subsetList = new ArrayList<>();
@@ -158,6 +275,16 @@ public class Main {
 		return subset;
 	}
 
+	/*
+	 * Computes the informational gain of the given data set.
+	 * @param attribute_list: The input attribute list of the
+	 * data set.
+	 * Returns a HasMap.Entry that contains the attribute's static
+	 * global index that points to that attribute in the data set.
+	 * The global index is the key in the Hashmap.Entry return
+	 * object, and it also returns a String representation of the
+	 * name of the attribute as the value of the Hashmap.Entry.
+	 */
 	public static HashMap.Entry<Integer, String> info(String[][] D, HashMap<Integer, String> attribute_list){
 
 		double info_D = 0;
@@ -193,7 +320,6 @@ public class Main {
 				
 			}
 			
-			//System.out.println(D_i + "," + d + "," + info_Da + "," + info_D);
 			if((info_D - info_Da) > maxInfo){
 				maxInfo = info_D - info_Da;
 				splitAttribute = e;
@@ -204,7 +330,12 @@ public class Main {
 		return splitAttribute;
 	}
 	
-	
+	/*
+	 * Returns the values in the data set of the attribute given.
+	 * Returns a Hashmap with the value at the given attribute as
+	 * the key, and the amount of times that value is present as the
+	 * Hashmap value.
+	 */
 	public static HashMap<String, Integer> getValues(String[][] D, int v){
 		
 		HashMap<String, Integer> values = new HashMap<>();
@@ -227,6 +358,9 @@ public class Main {
 		return values;
 	}
 
+	/*
+	 * Returns the majority class in the data set, as a String.
+	 */
 	public static String getMajorityClass(String[][] D){
 
 		HashMap<String, Integer> classValues = new HashMap<>();
@@ -263,6 +397,13 @@ public class Main {
 
 	}
 
+	/*
+	 * Searches the input dataset's class attribute and
+	 * determines if all tuples have the same class.
+	 * If all tuples have the same class it returns the class name.
+	 * Otherwise it returns null. 
+	 *
+	 */
 	public static String sameClass(String[][] D){
 
 		String curClassValue = D[0][GENES_CLASS_LOC];
@@ -284,10 +425,10 @@ public class Main {
 	}
 
 
-	public static String[][] genesRelation(String fileName) throws FileNotFoundException{
+	public static String[][] genesRelation(String fileName, int numTuples) throws FileNotFoundException{
 
 		Scanner in = new Scanner(new File(fileName));
-		String[][] returnSet = new String[4346][20];
+		String[][] returnSet = new String[numTuples][20];
 
 
 		int index = 0;
@@ -333,6 +474,9 @@ public class Main {
 
 	}
 
+	/*
+	 * Must edit to combine this function with the other file read function.
+	 */
 	public static String[][] interactionsRelation(String fileName) throws FileNotFoundException{
 
 		Scanner in = new Scanner(new File(fileName));
@@ -364,6 +508,10 @@ public class Main {
 
 	}
 
+	/*
+	 * Prints a 2D array
+	 * @param a: input 2D array to print.
+	 */
 	public static void printArray(String[][] a){
 		for(int i = 0; i < a.length; i++){
 			for(int j = 0; j < a[i].length; j++){
